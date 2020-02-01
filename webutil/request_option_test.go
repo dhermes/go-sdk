@@ -6,13 +6,21 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
+	"io"
 	"io/ioutil"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
 
 	"github.com/blend/go-sdk/assert"
+	"github.com/blend/go-sdk/ex"
+)
+
+// NOTE: Verify that `maybeBadWriter` satisfies `io.Writer`.
+var (
+	_ io.Writer = (*maybeBadWriter)(nil)
 )
 
 type xmlBody struct {
@@ -277,6 +285,42 @@ func TestOptXMLBody(t *testing.T) {
 	assert.True(ok)
 }
 
+func Test_populateFormData(t *testing.T) {
+	assert := assert.New(t)
+
+	// Happy path
+	b := new(bytes.Buffer)
+	w := multipart.NewWriter(b)
+	file := PostedFile{Key: "a", FileName: "b.txt", Contents: []byte("hey")}
+	files := []PostedFile{file}
+	err := populateFormData(w, files)
+	assert.Nil(err)
+	// NOTE: This relies on the fact that the randomly generated boundary is
+	//       always length 60.
+	assert.Len(b.Bytes(), 237)
+
+	// `CreateFormFile` fails
+	we := ex.New("write-error at CreateForm")
+	mbw := &maybeBadWriter{WriteError: we, ErrorAfter: 1}
+	w = multipart.NewWriter(mbw)
+	err = populateFormData(w, files)
+	assert.Equal(we, err)
+
+	// `io.Copy` fails
+	we = ex.New("write-error at io.Copy")
+	mbw = &maybeBadWriter{WriteError: we, ErrorAfter: 2}
+	w = multipart.NewWriter(mbw)
+	err = populateFormData(w, files)
+	assert.Equal(we, err)
+
+	// `w.Close` fails
+	we = ex.New("write-error at w.Close")
+	mbw = &maybeBadWriter{WriteError: we, ErrorAfter: 3}
+	w = multipart.NewWriter(mbw)
+	err = populateFormData(w, files)
+	assert.Equal(we, err)
+}
+
 func getBoundary(assert *assert.Assertions, h http.Header) string {
 	boundaryPrefix := "multipart/form-data; boundary="
 	ct := h.Get(HeaderContentType)
@@ -292,4 +336,18 @@ func validateGetBody(assert *assert.Assertions, r *http.Request, expected []byte
 	bodyBytes, err := ioutil.ReadAll(bodyRC)
 	assert.Nil(err)
 	assert.Equal(expected, bodyBytes)
+}
+
+type maybeBadWriter struct {
+	Count      int
+	ErrorAfter int
+	WriteError error
+}
+
+func (mbw *maybeBadWriter) Write(p []byte) (int, error) {
+	mbw.Count++
+	if mbw.Count == mbw.ErrorAfter {
+		return len(p), mbw.WriteError
+	}
+	return len(p), nil
 }

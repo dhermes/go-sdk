@@ -210,20 +210,10 @@ func OptPostedFiles(files ...PostedFile) RequestOption {
 
 		b := new(bytes.Buffer)
 		w := multipart.NewWriter(b)
-		for _, file := range files {
-			fw, err := w.CreateFormFile(file.Key, file.FileName)
-			if err != nil {
-				return err
-			}
-			_, err = io.Copy(fw, bytes.NewBuffer(file.Contents))
-			if err != nil {
-				return err
-			}
-		}
-		r.Header.Set("Content-Type", w.FormDataContentType())
-		if err := w.Close(); err != nil {
+		if err := populateFormData(w, files); err != nil {
 			return err
 		}
+		r.Header.Set("Content-Type", w.FormDataContentType())
 
 		bb := b.Bytes()
 		r.Body = ioutil.NopCloser(bytes.NewReader(bb))
@@ -273,4 +263,23 @@ func OptXMLBody(obj interface{}) RequestOption {
 		r.ContentLength = int64(len(contents))
 		return nil
 	}
+}
+
+func populateFormData(w *multipart.Writer, files []PostedFile) error {
+	for _, file := range files {
+		fw, err := w.CreateFormFile(file.Key, file.FileName)
+		if err != nil {
+			return err
+		}
+		_, err = io.Copy(fw, bytes.NewBuffer(file.Contents))
+		if err != nil {
+			return err
+		}
+	}
+
+	if err := w.Close(); err != nil {
+		return err
+	}
+
+	return nil
 }
