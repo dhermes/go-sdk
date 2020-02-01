@@ -10,6 +10,12 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"sync"
+)
+
+var (
+	makeBytesBuffer     func() bytesWriter = makeBytesBufferDefault
+	makeBytesBufferLock sync.Mutex
 )
 
 // RequestOption is an option for http.Request.
@@ -208,7 +214,7 @@ func OptPostedFiles(files ...PostedFile) RequestOption {
 			r.Header = make(http.Header)
 		}
 
-		b := new(bytes.Buffer)
+		b := makeBytesBuffer()
 		w := multipart.NewWriter(b)
 		if err := populateFormData(w, files); err != nil {
 			return err
@@ -282,4 +288,30 @@ func populateFormData(w *multipart.Writer, files []PostedFile) error {
 	}
 
 	return nil
+}
+
+// bytesWriter is an interface is meant to stand in for `bytes.Buffer`;
+// intended to support testing.
+type bytesWriter interface {
+	io.Writer
+	Bytes() []byte
+}
+
+// makeBytesBufferDefault creates an empty `bytes.Buffer`.
+func makeBytesBufferDefault() bytesWriter {
+	return new(bytes.Buffer)
+}
+
+// setMakeBytesBuffer sets the `makeBytesBuffer` factory.
+func setMakeBytesBuffer(mbb func() bytesWriter) {
+	makeBytesBufferLock.Lock()
+	defer makeBytesBufferLock.Unlock()
+	makeBytesBuffer = mbb
+}
+
+// restoreMakeBytesBuffer restores the `makeBytesBuffer` factory.
+func restoreMakeBytesBuffer() {
+	makeBytesBufferLock.Lock()
+	defer makeBytesBufferLock.Unlock()
+	makeBytesBuffer = makeBytesBufferDefault
 }

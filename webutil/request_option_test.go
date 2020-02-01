@@ -230,6 +230,17 @@ func TestOptPostedFiles(t *testing.T) {
 	assert.Equal([]byte(expected), bodyBytes)
 	assert.Equal(r.ContentLength, len(expected))
 	validateGetBody(assert, r, []byte(expected))
+
+	// Sad path
+	we := ex.New("write-error at CreateForm")
+	mbw := &maybeBadWriter{WriteError: we, ErrorAfter: 1}
+	setMakeBytesBuffer(func() bytesWriter { return mbw })
+	defer restoreMakeBytesBuffer()
+
+	opt = OptPostedFiles(file1)
+	r = &http.Request{}
+	err = opt(r)
+	assert.Equal(we, err)
 }
 
 func TestOptJSONBody(t *testing.T) {
@@ -350,4 +361,8 @@ func (mbw *maybeBadWriter) Write(p []byte) (int, error) {
 		return len(p), mbw.WriteError
 	}
 	return len(p), nil
+}
+
+func (mbw *maybeBadWriter) Bytes() []byte {
+	return nil
 }
