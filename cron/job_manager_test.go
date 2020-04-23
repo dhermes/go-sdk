@@ -109,13 +109,13 @@ func TestEnabledProvider(t *testing.T) {
 
 func TestFiresErrorOnTaskError(t *testing.T) {
 	a := assert.New(t)
-	a.StartTimeout(2000 * time.Millisecond)
-	defer a.EndTimeout()
 
 	agent := logger.All(logger.OptOutput(ioutil.Discard))
 	defer agent.Close()
 
-	manager := New(OptLog(agent))
+	manager := New(
+		OptLog(agent),
+	)
 	defer manager.Stop()
 
 	var errorDidFire bool
@@ -123,7 +123,7 @@ func TestFiresErrorOnTaskError(t *testing.T) {
 	wg := sync.WaitGroup{}
 	wg.Add(2)
 
-	agent.Listen(logger.Error, "foo", func(_ context.Context, e logger.Event) {
+	agent.Listen(logger.Error, uuid.V4().String(), func(_ context.Context, e logger.Event) {
 		defer wg.Done()
 		errorDidFire = true
 		if typed, isTyped := e.(logger.ErrorEvent); isTyped {
@@ -132,16 +132,21 @@ func TestFiresErrorOnTaskError(t *testing.T) {
 			}
 		}
 	})
-
-	manager.LoadJobs(NewJob(OptJobName("error_test"), OptJobAction(func(ctx context.Context) error {
-		defer wg.Done()
-		return fmt.Errorf("this is only a test")
-	})))
-	manager.RunJob("error_test")
+	job := NewJob(
+		OptJobName("error_test"),
+		OptJobAction(func(ctx context.Context) error {
+			defer wg.Done()
+			return fmt.Errorf("this is only a test")
+		}),
+	)
+	manager.LoadJobs(job)
+	_, done, err := manager.RunJob(job.Name())
+	a.Nil(err)
 	wg.Wait()
 
 	a.True(errorDidFire)
 	a.True(errorMatched)
+	<-done
 }
 
 func TestManagerTracer(t *testing.T) {
@@ -150,18 +155,18 @@ func TestManagerTracer(t *testing.T) {
 	wg := sync.WaitGroup{}
 	wg.Add(2)
 	var didCallStart, didCallFinish bool
-	var startTaskCorrect, finishTaskCorrect, errorUnset bool
+	var errorUnset bool
+	var foundJobName string
 	manager := New(OptTracer(&mockTracer{
-		OnStart: func(ctx context.Context) {
+		OnStart: func(ctx context.Context, jobName string) {
 			defer wg.Done()
 			didCallStart = true
-			startTaskCorrect = GetJobInvocation(ctx).JobName == "tracer-test"
+			foundJobName = jobName
 		},
-		OnFinish: func(ctx context.Context) {
+		OnFinish: func(ctx context.Context, err error) {
 			defer wg.Done()
 			didCallFinish = true
-			finishTaskCorrect = GetJobInvocation(ctx).JobName == "tracer-test"
-			errorUnset = GetJobInvocation(ctx).Err == nil
+			errorUnset = err == nil
 		},
 	}))
 
@@ -170,9 +175,8 @@ func TestManagerTracer(t *testing.T) {
 	wg.Wait()
 	assert.True(didCallStart)
 	assert.True(didCallFinish)
-	assert.True(startTaskCorrect)
-	assert.True(finishTaskCorrect)
 	assert.True(errorUnset)
+	assert.Equal("tracer-test", foundJobName)
 }
 
 func TestJobManagerJobLifecycle(t *testing.T) {
@@ -183,7 +187,7 @@ func TestJobManagerJobLifecycle(t *testing.T) {
 	defer jm.Stop()
 
 	var shouldFail bool
-	j := newBrokenFixedTest(func(_ context.Context) error {
+	j := newLifecycleTest(func(ctx context.Context) error {
 		defer func() {
 			shouldFail = !shouldFail
 		}()
@@ -194,34 +198,35 @@ func TestJobManagerJobLifecycle(t *testing.T) {
 	})
 	jm.LoadJobs(j)
 
-	completeSignal := j.CompleteSignal
-	ji, err := jm.RunJob("broken-fixed")
+	successSignal := j.SuccessSignal
+	_, done, err := jm.RunJob(j.Name())
 	assert.Nil(err)
-	<-ji.Done
-	<-completeSignal
+	<-done
+	<-successSignal
 
 	brokenSignal := j.BrokenSignal
-	ji, err = jm.RunJob("broken-fixed")
+	_, done, err = jm.RunJob(j.Name())
 	assert.Nil(err)
-	<-ji.Done
+	<-done
 	<-brokenSignal
 
 	fixedSignal := j.FixedSignal
-	ji, err = jm.RunJob("broken-fixed")
+	_, done, err = jm.RunJob(j.Name())
 	assert.Nil(err)
-	<-ji.Done
+	<-done
 	<-fixedSignal
 
 	assert.Equal(3, j.Starts)
+	assert.Equal(3, j.Completes)
 	assert.Equal(1, j.Failures)
-	assert.Equal(2, j.Completes)
+	assert.Equal(2, j.Successes)
 }
 
 func TestJobManagerJob(t *testing.T) {
 	assert := assert.New(t)
 
 	jm := New()
-	j := newBrokenFixedTest(func(_ context.Context) error {
+	j := newLifecycleTest(func(_ context.Context) error {
 		return nil
 	})
 	jm.LoadJobs(j)
@@ -243,24 +248,24 @@ func TestJobManagerLoadJob(t *testing.T) {
 
 	assert.True(jm.HasJob("load-job-test-minimum"))
 
-	meta, err := jm.Job("load-job-test-minimum")
+	jobScheduler, err := jm.Job("load-job-test-minimum")
 	assert.Nil(err)
-	assert.NotNil(meta)
+	assert.NotNil(jobScheduler)
 
-	assert.Equal("load-job-test-minimum", meta.Name())
-	assert.NotNil(meta.Job)
+	assert.Equal("load-job-test-minimum", jobScheduler.Name())
+	assert.NotNil(jobScheduler.Job)
 
-	assert.Equal(DefaultDisabled, meta.Disabled())
-	assert.Zero(meta.Timeout())
-	assert.Equal(DefaultShouldSkipLoggerListeners, meta.ShouldSkipLoggerListeners())
-	assert.Equal(DefaultShouldSkipLoggerOutput, meta.ShouldSkipLoggerOutput())
+	assert.Equal(DefaultDisabled, jobScheduler.Disabled())
+	assert.Zero(jobScheduler.Config().TimeoutOrDefault())
+	assert.Equal(DefaultShouldSkipLoggerListeners, jobScheduler.Config().ShouldSkipLoggerListenersOrDefault())
+	assert.Equal(DefaultShouldSkipLoggerOutput, jobScheduler.Config().ShouldSkipLoggerOutputOrDefault())
 
 	jm.LoadJobs(&testJobWithTimeout{TimeoutDuration: time.Second})
 
-	meta, err = jm.Job("testJobWithTimeout")
+	jobScheduler, err = jm.Job("testJobWithTimeout")
 	assert.Nil(err)
-	assert.NotNil(meta)
-	assert.Equal(time.Second, meta.Timeout())
+	assert.NotNil(jobScheduler)
+	assert.Equal(time.Second, jobScheduler.Config().TimeoutOrDefault())
 }
 
 func TestJobManagerLoadJobs(t *testing.T) {
@@ -294,79 +299,32 @@ func TestJobManagerIsRunning(t *testing.T) {
 	assert.False(jm.IsJobRunning(uuid.V4().String()))
 }
 
-func TestJobManagerStatus(t *testing.T) {
-	assert := assert.New(t)
-
-	jm := New()
-
-	jm.LoadJobs(NewJob(OptJobName("test-0")))
-	jm.LoadJobs(NewJob(OptJobName("test-1")))
-
-	checked := make(chan struct{})
-	proceed := make(chan struct{})
-	jm.LoadJobs(NewJob(OptJobName("is-running-test"), OptJobAction(func(_ context.Context) error {
-		close(proceed)
-		<-checked
-		return nil
-	})))
-
-	jm.RunJob("is-running-test")
-	<-proceed
-
-	status := jm.Status()
-	close(checked)
-
-	assert.NotNil(status)
-	assert.Len(status.Jobs, 3)
-	assert.Len(status.Running, 1)
-}
-
 func TestJobManagerCancelJob(t *testing.T) {
 	assert := assert.New(t)
 
-	jm := New()
-
-	proceed := make(chan struct{})
+	started := make(chan struct{})
+	cancelling := make(chan struct{})
 	cancelled := make(chan struct{})
-	jm.LoadJobs(NewJob(OptJobName("is-running-test"), OptJobAction(func(ctx context.Context) error {
-		close(proceed)
-		select {
-		case <-ctx.Done():
-			return nil
-		}
-	}), OptJobOnCancellation(func(_ context.Context) {
-		close(cancelled)
-	})))
 
-	jm.RunJob("is-running-test")
-	<-proceed
-	assert.Nil(jm.CancelJob("is-running-test"))
-	<-cancelled
-	assert.False(jm.IsJobRunning("is-running-test"))
-}
-
-func TestJobManagerStatusRunning(t *testing.T) {
-	assert := assert.New(t)
-
-	jobDidRun := make(chan struct{})
-	jobStarted := make(chan struct{})
-	jobShouldProceed := make(chan struct{})
 	jm := New()
-	jm.LoadJobs(NewJob(OptJobName("status-running-test"), OptJobAction(func(_ context.Context) error {
-		defer close(jobDidRun)
-		close(jobStarted)
-		<-jobShouldProceed
+	job := NewJob(OptJobName("is-running-test"), OptJobAction(func(ctx context.Context) error {
+		close(started)
+		<-cancelling
+		time.Sleep(time.Millisecond) // this is a pad to make the test more reliable.
 		return nil
-	})))
+	}), OptJobOnCancellation(func(_ context.Context) {
+		close(cancelled) // but signal on the lifecycle event
+	}))
+	jm.LoadJobs(job)
 
-	status := jm.Status()
-	assert.Empty(status.Running)
-	jm.RunJob("status-running-test")
-	<-jobStarted
-	status = jm.Status()
-	assert.Len(status.Running, 1)
-	close(jobShouldProceed)
-	<-jobDidRun
+	_, done, err := jm.RunJob(job.Name())
+	assert.Nil(err)
+	<-started
+	close(cancelling)
+	assert.Nil(jm.CancelJob(job.Name()))
+	<-cancelled
+	assert.False(jm.IsJobRunning(job.Name()))
+	<-done
 }
 
 func TestJobManagerEnableDisableJob(t *testing.T) {

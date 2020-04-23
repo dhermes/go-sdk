@@ -14,6 +14,8 @@ func TestMain(m *testing.M) {
 	assert.Main(m)
 }
 
+func noop(_ context.Context) error { return nil }
+
 const (
 	runAtJobName = "runAt"
 )
@@ -49,7 +51,9 @@ func (raj *runAtJob) Execute(ctx context.Context) error {
 }
 
 var (
-	_ OnCancellationHandler = (*testJobWithTimeout)(nil)
+	_ Job               = (*testJobWithTimeout)(nil)
+	_ ConfigProvider    = (*testJobWithTimeout)(nil)
+	_ LifecycleProvider = (*testJobWithTimeout)(nil)
 )
 
 type testJobWithTimeout struct {
@@ -63,8 +67,10 @@ func (tj *testJobWithTimeout) Name() string {
 	return "testJobWithTimeout"
 }
 
-func (tj *testJobWithTimeout) Timeout() time.Duration {
-	return tj.TimeoutDuration
+func (tj *testJobWithTimeout) Config() JobConfig {
+	return JobConfig{
+		Timeout: tj.TimeoutDuration,
+	}
 }
 
 func (tj *testJobWithTimeout) Schedule() Schedule {
@@ -73,6 +79,12 @@ func (tj *testJobWithTimeout) Schedule() Schedule {
 
 func (tj *testJobWithTimeout) Execute(ctx context.Context) error {
 	return tj.RunDelegate(ctx)
+}
+
+func (tj *testJobWithTimeout) Lifecycle() JobLifecycle {
+	return JobLifecycle{
+		OnCancellation: tj.OnCancellation,
+	}
 }
 
 func (tj *testJobWithTimeout) OnCancellation(ctx context.Context) {
@@ -97,8 +109,8 @@ func (tj *testJobInterval) Execute(ctx context.Context) error {
 }
 
 var (
-	_ Job              = (*testWithDisabled)(nil)
-	_ DisabledProvider = (*testWithDisabled)(nil)
+	_ Job            = (*testWithDisabled)(nil)
+	_ ConfigProvider = (*testWithDisabled)(nil)
 )
 
 type testWithDisabled struct {
@@ -114,8 +126,10 @@ func (twe testWithDisabled) Schedule() Schedule {
 	return nil
 }
 
-func (twe testWithDisabled) Disabled() bool {
-	return twe.disabled
+func (twe testWithDisabled) Config() JobConfig {
+	return JobConfig{
+		Disabled: &twe.disabled,
+	}
 }
 
 func (twe testWithDisabled) Execute(ctx context.Context) error {
@@ -126,13 +140,13 @@ func (twe testWithDisabled) Execute(ctx context.Context) error {
 }
 
 type mockTracer struct {
-	OnStart  func(context.Context)
-	OnFinish func(context.Context)
+	OnStart  func(context.Context, string)
+	OnFinish func(context.Context, error)
 }
 
-func (mt mockTracer) Start(ctx context.Context) (context.Context, TraceFinisher) {
+func (mt mockTracer) Start(ctx context.Context, jobName string) (context.Context, TraceFinisher) {
 	if mt.OnStart != nil {
-		mt.OnStart(ctx)
+		mt.OnStart(ctx, jobName)
 	}
 	return ctx, &mockTraceFinisher{Parent: &mt}
 }
@@ -141,74 +155,81 @@ type mockTraceFinisher struct {
 	Parent *mockTracer
 }
 
-func (mtf mockTraceFinisher) Finish(ctx context.Context) {
+func (mtf mockTraceFinisher) Finish(ctx context.Context, err error) {
 	if mtf.Parent != nil && mtf.Parent.OnFinish != nil {
-		mtf.Parent.OnFinish(ctx)
+		mtf.Parent.OnFinish(ctx, err)
 	}
 }
 
 var (
-	_ OnBeginHandler    = (*brokenFixedTest)(nil)
-	_ OnCompleteHandler = (*brokenFixedTest)(nil)
-	_ OnFailureHandler  = (*brokenFixedTest)(nil)
-	_ OnBrokenHandler   = (*brokenFixedTest)(nil)
-	_ OnFixedHandler    = (*brokenFixedTest)(nil)
+	_ Job               = (*lifecycleTest)(nil)
+	_ LifecycleProvider = (*lifecycleTest)(nil)
 )
 
-func newBrokenFixedTest(action func(context.Context) error) *brokenFixedTest {
-	return &brokenFixedTest{
+func newLifecycleTest(action func(context.Context) error) *lifecycleTest {
+	return &lifecycleTest{
 		CompleteSignal: make(chan struct{}),
+		SuccessSignal:  make(chan struct{}),
 		BrokenSignal:   make(chan struct{}),
 		FixedSignal:    make(chan struct{}),
 		Action:         action,
 	}
 }
 
-type brokenFixedTest struct {
+type lifecycleTest struct {
 	sync.Mutex
 	Starts         int
 	Completes      int
+	Successes      int
 	Failures       int
 	CompleteSignal chan struct{}
+	SuccessSignal  chan struct{}
 	BrokenSignal   chan struct{}
 	FixedSignal    chan struct{}
 	Action         func(context.Context) error
 }
 
-func (job *brokenFixedTest) Name() string { return "broken-fixed" }
-
-func (job *brokenFixedTest) Execute(ctx context.Context) error {
+func (job *lifecycleTest) Name() string { return "lifecycle-test" }
+func (job *lifecycleTest) Execute(ctx context.Context) error {
 	return job.Action(ctx)
 }
-
-func (job *brokenFixedTest) Schedule() Schedule { return nil }
-
-func (job *brokenFixedTest) OnBegin(ctx context.Context) {
+func (job *lifecycleTest) Lifecycle() JobLifecycle {
+	return JobLifecycle{
+		OnBegin:    job.OnBegin,
+		OnComplete: job.OnComplete,
+		OnSuccess:  job.OnSuccess,
+		OnError:    job.OnError,
+		OnBroken:   job.OnBroken,
+		OnFixed:    job.OnFixed,
+	}
+}
+func (job *lifecycleTest) OnBegin(ctx context.Context) {
 	job.Starts++
 }
-
-func (job *brokenFixedTest) OnFailure(ctx context.Context) {
+func (job *lifecycleTest) OnError(ctx context.Context) {
 	job.Failures++
 }
-
-func (job *brokenFixedTest) OnComplete(ctx context.Context) {
+func (job *lifecycleTest) OnComplete(ctx context.Context) {
 	job.Lock()
 	defer job.Unlock()
-
 	close(job.CompleteSignal)
 	job.CompleteSignal = make(chan struct{})
 	job.Completes++
 }
-
-func (job *brokenFixedTest) OnBroken(ctx context.Context) {
+func (job *lifecycleTest) OnSuccess(ctx context.Context) {
 	job.Lock()
 	defer job.Unlock()
-
+	close(job.SuccessSignal)
+	job.SuccessSignal = make(chan struct{})
+	job.Successes++
+}
+func (job *lifecycleTest) OnBroken(ctx context.Context) {
+	job.Lock()
+	defer job.Unlock()
 	close(job.BrokenSignal)
 	job.BrokenSignal = make(chan struct{})
 }
-
-func (job *brokenFixedTest) OnFixed(ctx context.Context) {
+func (job *lifecycleTest) OnFixed(ctx context.Context) {
 	job.Lock()
 	defer job.Unlock()
 	close(job.FixedSignal)
@@ -219,3 +240,17 @@ type loadJobTestMinimum struct{}
 
 func (job loadJobTestMinimum) Name() string                    { return "load-job-test-minimum" }
 func (job loadJobTestMinimum) Execute(_ context.Context) error { return nil }
+
+var (
+	_ Job              = (*scheduleProvider)(nil)
+	_ ScheduleProvider = (*scheduleProvider)(nil)
+)
+
+type scheduleProvider struct {
+	ScheduleProvider func() Schedule
+	Action           func(context.Context) error
+}
+
+func (job scheduleProvider) Name() string                      { return "schedule-provider" }
+func (job scheduleProvider) Schedule() Schedule                { return job.ScheduleProvider() }
+func (job scheduleProvider) Execute(ctx context.Context) error { return job.Action(ctx) }

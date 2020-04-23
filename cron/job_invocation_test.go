@@ -1,45 +1,52 @@
 package cron
 
 import (
-	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/blend/go-sdk/assert"
-	"github.com/blend/go-sdk/ex"
 	"github.com/blend/go-sdk/uuid"
 )
 
-func TestJobInvocationJSON(t *testing.T) {
+func TestJobInvocationElapsed(t *testing.T) {
 	assert := assert.New(t)
 
-	test := JobInvocation{
-		ID:        uuid.V4().String(),
-		JobName:   uuid.V4().String(),
-		Started:   time.Date(2019, 9, 4, 12, 11, 10, 9, time.UTC),
-		Finished:  time.Date(2019, 9, 6, 12, 11, 10, 9, time.UTC),
-		Cancelled: time.Date(2019, 9, 7, 12, 11, 10, 9, time.UTC),
-		Timeout:   time.Date(2019, 9, 8, 12, 11, 10, 9, time.UTC),
-		State:     JobInvocationStateComplete,
-		Elapsed:   time.Second,
-		Err:       ex.New("this is a test"),
+	started := time.Now().UTC()
+
+	assert.Equal(200*time.Millisecond, (&JobInvocation{
+		Started:  started,
+		Complete: started.Add(200 * time.Millisecond),
+	}).Elapsed())
+
+	assert.Zero((&JobInvocation{
+		Started: started,
+	}).Elapsed())
+}
+
+func TestJobInvocationClone(t *testing.T) {
+	assert := assert.New(t)
+
+	ts := time.Now().UTC()
+	ji := &JobInvocation{
+		ID:         NewJobInvocationID(),
+		JobName:    uuid.V4().String(),
+		Started:    ts,
+		Complete:   ts.Add(100 * time.Millisecond),
+		Err:        fmt.Errorf("this is a test"),
+		Status:     JobInvocationStatusErrored,
+		Parameters: map[string]string{"foo": "bar", "bailey": "dog"},
+		State:      "this is also a test",
+		Cancel:     func() {},
 	}
-
-	contents, err := json.Marshal(test)
-	assert.Nil(err)
-	assert.NotEmpty(contents)
-
-	var verify JobInvocation
-	assert.Nil(json.Unmarshal(contents, &verify))
-	assert.Equal(test.ID, verify.ID)
-	assert.Equal(test.JobName, verify.JobName)
-	assert.Equal(test.Started, verify.Started)
-	assert.Equal(test.Finished, verify.Finished)
-	assert.Equal(test.Cancelled, verify.Cancelled)
-	assert.Equal(test.Timeout, verify.Timeout)
-	assert.Equal(test.State, verify.State)
-	assert.Equal(test.Elapsed, verify.Elapsed)
-
-	assert.NotNil(verify.Err)
-	assert.Contains(verify.Err.Error(), "this is a test")
+	cloned := ji.Clone()
+	assert.Equal(ji.ID, cloned.ID)
+	assert.Equal(ji.JobName, cloned.JobName)
+	assert.Equal(ji.Started, cloned.Started)
+	assert.Equal(ji.Complete, cloned.Complete)
+	assert.Equal(ji.Err, cloned.Err)
+	assert.Equal(ji.Status, cloned.Status)
+	assert.Equal(ji.Parameters, cloned.Parameters)
+	assert.Equal(ji.State, cloned.State)
+	assert.NotNil(cloned.Cancel)
 }

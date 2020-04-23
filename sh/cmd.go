@@ -55,9 +55,9 @@ func CmdParsed(statement string) (*exec.Cmd, error) {
 
 // CmdParsedContext returns a command for a full comamnd statement within a context..
 func CmdParsedContext(ctx context.Context, statement string) (*exec.Cmd, error) {
-	parts := strings.SplitN(statement, " ", 2)
+	parts := strings.Split(statement, " ")
 	if len(parts) > 1 {
-		return Cmd(parts[0], parts[1])
+		return CmdContext(ctx, parts[0], parts[1:]...)
 	}
 	return CmdContext(ctx, parts[0])
 }

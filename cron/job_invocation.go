@@ -2,29 +2,35 @@ package cron
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"time"
 
-	"github.com/blend/go-sdk/bufferutil"
-	"github.com/blend/go-sdk/ex"
 	"github.com/blend/go-sdk/uuid"
 )
 
 // NewJobInvocation returns a new job invocation.
 func NewJobInvocation(jobName string) *JobInvocation {
-	output := new(bufferutil.Buffer)
-	handlers := new(bufferutil.BufferHandlers)
-	output.Handler = handlers.Handle
 	return &JobInvocation{
-		ID:             NewJobInvocationID(),
-		Started:        Now(),
-		State:          JobInvocationStateRunning,
-		JobName:        jobName,
-		Output:         output,
-		OutputHandlers: handlers,
-		Done:           make(chan struct{}),
+		ID:      NewJobInvocationID(),
+		Status:  JobInvocationStatusIdle,
+		JobName: jobName,
 	}
+}
+
+type contextKeyJobInvocation struct{}
+
+// WithJobInvocation adds job invocation to a context.
+func WithJobInvocation(ctx context.Context, ji *JobInvocation) context.Context {
+	return context.WithValue(ctx, contextKeyJobInvocation{}, ji)
+}
+
+// GetJobInvocation gets the job invocation from a given context.
+func GetJobInvocation(ctx context.Context) *JobInvocation {
+	if value := ctx.Value(contextKeyJobInvocation{}); value != nil {
+		if typed, ok := value.(*JobInvocation); ok {
+			return typed
+		}
+	}
+	return nil
 }
 
 // NewJobInvocationID returns a new pseudo-unique job invocation identifier.
@@ -34,85 +40,42 @@ func NewJobInvocationID() string {
 
 // JobInvocation is metadata for a job invocation (or instance of a job running).
 type JobInvocation struct {
-	ID             string
-	JobName        string
-	Started        time.Time
-	Finished       time.Time
-	Cancelled      time.Time
-	Timeout        time.Time
-	Err            error
-	Elapsed        time.Duration
-	Parameters     JobParameters
-	State          JobInvocationState
-	Output         *bufferutil.Buffer
-	OutputHandlers *bufferutil.BufferHandlers
+	ID      string `json:"id"`
+	JobName string `json:"jobName"`
 
-	// these cannot be json marshaled.
-	Context context.Context
-	Cancel  context.CancelFunc
-	Done    chan struct{}
+	Started  time.Time `json:"started"`
+	Complete time.Time `json:"complete"`
+	Err      error     `json:"err"`
+
+	Parameters JobParameters       `json:"parameters"`
+	Status     JobInvocationStatus `json:"status"`
+	State      interface{}         `json:"-"`
+
+	Cancel context.CancelFunc `json:"-"`
 }
 
-// MarshalJSON marshals the invocation as json.
-func (ji JobInvocation) MarshalJSON() ([]byte, error) {
-	values := map[string]interface{}{
-		"id":      ji.ID,
-		"jobName": ji.JobName,
-		"started": ji.Started,
-		"elapsed": ji.Elapsed,
-		"state":   ji.State,
-		"output":  ji.Output,
+// Elapsed returns the elapsed time for the invocation.
+func (ji *JobInvocation) Elapsed() time.Duration {
+	if !ji.Complete.IsZero() {
+		return ji.Complete.Sub(ji.Started)
 	}
-	if !ji.Finished.IsZero() {
-		values["finished"] = ji.Finished
-	}
-	if !ji.Cancelled.IsZero() {
-		values["cancelled"] = ji.Cancelled
-	}
-	if !ji.Timeout.IsZero() {
-		values["timeout"] = ji.Timeout
-	}
-	if ji.Err != nil {
-		values["err"] = ji.Err.Error()
-	}
-	contents, err := json.Marshal(values)
-	return contents, ex.New(err)
+	return 0
 }
 
-// UnmarshalJSON unmarhsals
-func (ji *JobInvocation) UnmarshalJSON(contents []byte) error {
-	var values struct {
-		ID        string             `json:"id"`
-		JobName   string             `json:"jobName"`
-		Started   time.Time          `json:"started"`
-		Finished  time.Time          `json:"finished"`
-		Cancelled time.Time          `json:"cancelled"`
-		Timeout   time.Time          `json:"timeout"`
-		Elapsed   time.Duration      `json:"elapsed"`
-		State     JobInvocationState `json:"state"`
-		Error     string             `json:"err"`
-		Output    json.RawMessage    `json:"output"`
+// Clone clones the job invocation.
+func (ji *JobInvocation) Clone() *JobInvocation {
+	return &JobInvocation{
+		ID:      ji.ID,
+		JobName: ji.JobName,
+
+		Started:  ji.Started,
+		Complete: ji.Complete,
+		Err:      ji.Err,
+
+		Parameters: ji.Parameters,
+		Status:     ji.Status,
+		State:      ji.State,
+
+		Cancel: ji.Cancel,
 	}
-	if err := json.Unmarshal(contents, &values); err != nil {
-		return ex.New(err)
-	}
-	ji.ID = values.ID
-	ji.JobName = values.JobName
-	ji.Started = values.Started
-	ji.Finished = values.Finished
-	ji.Cancelled = values.Cancelled
-	ji.Timeout = values.Timeout
-	ji.Elapsed = values.Elapsed
-	ji.State = values.State
-	if values.Error != "" {
-		ji.Err = errors.New(values.Error)
-	}
-	ji.Output = new(bufferutil.Buffer)
-	if err := json.Unmarshal([]byte(values.Output), ji.Output); err != nil {
-		return ex.New(err)
-	}
-	handlers := new(bufferutil.BufferHandlers)
-	ji.Output.Handler = handlers.Handle
-	ji.OutputHandlers = handlers
-	return nil
 }

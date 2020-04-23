@@ -18,25 +18,19 @@ const (
 	DefaultShouldSkipLoggerListeners = false
 	// DefaultShouldSkipLoggerOutput is a default.
 	DefaultShouldSkipLoggerOutput = false
-	// DefaultHistoryEnabled is a default.
-	DefaultHistoryEnabled = false
-	// DefaultHistoryPersistenceEnabled is a default.
-	DefaultHistoryPersistenceEnabled = false
-	// DefaultHistoryMaxCount is the default number of history items to track.
-	DefaultHistoryMaxCount = 10
-	// DefaultHistoryMaxAge is the default maximum age of history items.
-	DefaultHistoryMaxAge = 6 * time.Hour
 )
 
 const (
 	// FlagBegin is an event flag.
 	FlagBegin = "cron.begin"
-	// FlagFailed is an event flag.
-	FlagFailed = "cron.failed"
-	// FlagCancelled is an event flag.
-	FlagCancelled = "cron.cancelled"
 	// FlagComplete is an event flag.
 	FlagComplete = "cron.complete"
+	// FlagSuccess is an event flag.
+	FlagSuccess = "cron.success"
+	// FlagErrored is an event flag.
+	FlagErrored = "cron.errored"
+	// FlagCancelled is an event flag.
+	FlagCancelled = "cron.cancelled"
 	// FlagBroken is an event flag.
 	FlagBroken = "cron.broken"
 	// FlagFixed is an event flag.
@@ -54,7 +48,6 @@ type JobManagerState string
 const (
 	JobManagerStateUnknown JobManagerState = "unknown"
 	JobManagerStateRunning JobManagerState = "started"
-	JobManagerStatePaused  JobManagerState = "paused"
 	JobManagerStateStopped JobManagerState = "stopped"
 )
 
@@ -68,13 +61,14 @@ const (
 	JobSchedulerStateStopped JobSchedulerState = "stopped"
 )
 
-// JobInvocationState is a job status.
-type JobInvocationState string
+// JobInvocationStatus is a job status.
+type JobInvocationStatus string
 
 // JobInvocationState values.
 const (
-	JobInvocationStateRunning   JobInvocationState = "running"
-	JobInvocationStateCancelled JobInvocationState = "cancelled"
-	JobInvocationStateFailed    JobInvocationState = "failed"
-	JobInvocationStateComplete  JobInvocationState = "complete"
+	JobInvocationStatusIdle      JobInvocationStatus = "idle"
+	JobInvocationStatusRunning   JobInvocationStatus = "running"
+	JobInvocationStatusCancelled JobInvocationStatus = "cancelled"
+	JobInvocationStatusErrored   JobInvocationStatus = "errored"
+	JobInvocationStatusSuccess   JobInvocationStatus = "success"
 )

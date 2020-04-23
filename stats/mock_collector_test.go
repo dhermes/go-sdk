@@ -1,6 +1,7 @@
 package stats
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -120,4 +121,32 @@ func TestMockCollectorTimeInMilliseconds(t *testing.T) {
 	assert.Zero(mockMetric.Gauge)
 	assert.Zero(mockMetric.Count)
 	assert.Zero(mockMetric.Histogram)
+}
+
+func TestMockCollectorFlush(t *testing.T) {
+	assert := assert.New(t)
+
+	collector := NewMockCollector()
+
+	err := collector.Flush()
+	assert.Nil(err)
+
+	expectedErr := fmt.Errorf("err")
+	collector.FlushErrors <- expectedErr
+	err = collector.Flush()
+	assert.Equal(expectedErr.Error(), err.Error())
+}
+
+func TestMockCollectorClose(t *testing.T) {
+	assert := assert.New(t)
+
+	collector := NewMockCollector()
+
+	err := collector.Close()
+	assert.Nil(err)
+
+	expectedErr := fmt.Errorf("err")
+	collector.CloseErrors <- expectedErr
+	err = collector.Close()
+	assert.Equal(expectedErr.Error(), err.Error())
 }

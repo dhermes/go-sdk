@@ -8,6 +8,7 @@ import (
 
 	"github.com/blend/go-sdk/env"
 	"github.com/blend/go-sdk/logger"
+	"github.com/blend/go-sdk/webutil"
 )
 
 // Option is an option for an app.
@@ -168,6 +169,14 @@ func OptNotFoundHandler(action Action) Option {
 func OptShutdownGracePeriod(d time.Duration) Option {
 	return func(a *App) error {
 		a.Config.ShutdownGracePeriod = d
+		return nil
+	}
+}
+
+// OptHTTPServerOptions adds options to the underlying http server.
+func OptHTTPServerOptions(opts ...webutil.HTTPServerOption) Option {
+	return func(a *App) error {
+		a.ServerOptions = append(a.ServerOptions, opts...)
 		return nil
 	}
 }

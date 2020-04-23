@@ -89,7 +89,7 @@ build:
 .PHONY: profanity
 profanity:
 	@echo "$(VERSION)/$(GIT_REF) >> profanity"
-	@go run cmd/profanity/main.go --rules PROFANITY_RULES.yml --exclude="cmd/*" --exclude="coverage.html" --exclude="dist/*" --exclude="*/node_modules/*"
+	@go run cmd/profanity/main.go --rules PROFANITY_RULES.yml --exclude="cmd/*" --exclude="coverage.html" --exclude="dist/*" --exclude="*/node_modules/*" --exclude="vendor/*"
 
 test-circleci:
 	@echo "$(VERSION)/$(GIT_REF) >> tests"
@@ -97,19 +97,19 @@ test-circleci:
 
 test:
 	@echo "$(VERSION)/$(GIT_REF) >> tests"
-	@go test $(PKGS) -timeout 15s
+	@go test $(PKGS) -timeout 15s -race
 
 test-verbose:
 	@echo "$(VERSION)/$(GIT_REF) >> tests"
-	@go test -v $(PKGS)
+	@go test -v $(PKGS) -timeout 15s -race
 
 cover:
 	@echo "$(VERSION)/$(GIT_REF) >> coverage"
-	@go run cmd/coverage/main.go --exclude="examples/*,cmd/*" --timeout="10s"
+	@go run cmd/coverage/main.go --exclude="examples/*,cmd/*" --timeout="30s" --race
 
 cover-ci:
 	@echo "$(VERSION)/$(GIT_REF) >> coverage"
-	@go run cmd/coverage/main.go --keep-coverage-out --covermode=atomic --coverprofile=coverage.txt --exclude="examples/*,cmd/*" --timeout="10s"
+	@go run cmd/coverage/main.go --keep-coverage-out --covermode=atomic --coverprofile=coverage.txt --exclude="examples/*,cmd/*" --timeout="30s"
 
 cover-enforce:
 	@echo "$(VERSION)/$(GIT_REF) >> coverage"

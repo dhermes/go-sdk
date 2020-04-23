@@ -59,7 +59,7 @@ func (c Client) Notify(ctx context.Context, ee logger.ErrorEvent) {
 
 func errEvent(ctx context.Context, ee logger.ErrorEvent) *raven.Event {
 	return &raven.Event{
-		Timestamp:   logger.GetEventTimestamp(ctx, ee).Unix(),
+		Timestamp:   logger.GetEventTimestamp(ctx, ee),
 		Fingerprint: errFingerprint(ctx, ex.ErrClass(ee.Err).Error()),
 		Level:       raven.Level(ee.GetFlag()),
 		Tags:        errTags(ctx),
@@ -100,16 +100,16 @@ func errExtra(ctx context.Context) map[string]interface{} {
 	return logger.GetAnnotations(ctx)
 }
 
-func errRequest(ee logger.ErrorEvent) (requestMeta raven.Request) {
+func errRequest(ee logger.ErrorEvent) *raven.Request {
 	if ee.State == nil {
-		return
+		return &raven.Request{}
 	}
 	typed, ok := ee.State.(*http.Request)
 	if !ok {
-		return
+		return &raven.Request{}
 	}
-	requestMeta = requestMeta.FromHTTPRequest(typed)
-	return
+
+	return raven.NewRequest(typed)
 }
 
 func errStackTrace(err error) *raven.Stacktrace {

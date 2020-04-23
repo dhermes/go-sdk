@@ -1,10 +1,13 @@
 package web
 
 import (
+	"io/ioutil"
+	"log"
 	"testing"
 
 	"github.com/blend/go-sdk/assert"
 	"github.com/blend/go-sdk/logger"
+	"github.com/blend/go-sdk/webutil"
 )
 
 func TestOptConfig(t *testing.T) {
@@ -38,4 +41,28 @@ func TestOptLog(t *testing.T) {
 	var app App
 	assert.Nil(OptLog(logger.None())(&app))
 	assert.NotNil(app.Log)
+}
+
+func TestOptHTTPServerOptions(t *testing.T) {
+	assert := assert.New(t)
+
+	baseline, baselineErr := New()
+	assert.Nil(baselineErr)
+	assert.NotNil(baseline)
+	assert.NotNil(baseline.Server)
+	assert.Nil(baseline.Server.ErrorLog)
+
+	app, err := New(
+		OptHTTPServerOptions(
+			webutil.OptHTTPServerErrorLog(log.New(ioutil.Discard, "", log.LstdFlags)),
+		),
+	)
+	assert.Nil(err)
+	assert.NotEmpty(app.ServerOptions)
+
+	go app.Start()
+	<-app.NotifyStarted()
+	defer app.Stop()
+
+	assert.NotNil(app.Server.ErrorLog)
 }

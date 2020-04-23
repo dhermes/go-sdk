@@ -85,3 +85,23 @@ func (collectors MultiCollector) TimeInMilliseconds(name string, value time.Dura
 	}
 	return nil
 }
+
+// Flush forces a flush on all collectors.
+func (collectors MultiCollector) Flush() error {
+	for _, collector := range collectors {
+		if err := collector.Flush(); err != nil {
+			return ex.New(err)
+		}
+	}
+	return nil
+}
+
+// Close closes all collectors.
+func (collectors MultiCollector) Close() error {
+	for _, collector := range collectors {
+		if err := collector.Close(); err != nil {
+			return ex.New(err)
+		}
+	}
+	return nil
+}

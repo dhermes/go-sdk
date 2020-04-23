@@ -15,8 +15,10 @@ var (
 // NewMockCollector returns a new mock collector.
 func NewMockCollector() *MockCollector {
 	return &MockCollector{
-		Events: make(chan MockMetric, 32),
-		Errors: make(chan error, 32),
+		Events:      make(chan MockMetric, 32),
+		Errors:      make(chan error, 32),
+		FlushErrors: make(chan error, 32),
+		CloseErrors: make(chan error, 32),
 	}
 }
 
@@ -25,8 +27,10 @@ type MockCollector struct {
 	namespace   string
 	defaultTags []string
 
-	Events chan MockMetric
-	Errors chan error
+	Events      chan MockMetric
+	Errors      chan error
+	FlushErrors chan error
+	CloseErrors chan error
 }
 
 // AddDefaultTag adds a default tag.
@@ -80,6 +84,22 @@ func (mc MockCollector) TimeInMilliseconds(name string, value time.Duration, tag
 	mc.Events <- MockMetric{Name: name, TimeInMilliseconds: timeutil.Milliseconds(value), Tags: append(mc.defaultTags, tags...)}
 	if len(mc.Errors) > 0 {
 		return <-mc.Errors
+	}
+	return nil
+}
+
+// Flush does nothing on a MockCollector.
+func (mc MockCollector) Flush() error {
+	if len(mc.FlushErrors) > 0 {
+		return <-mc.FlushErrors
+	}
+	return nil
+}
+
+// Close returns an error from the errors channel if any.
+func (mc MockCollector) Close() error {
+	if len(mc.CloseErrors) > 0 {
+		return <-mc.CloseErrors
 	}
 	return nil
 }

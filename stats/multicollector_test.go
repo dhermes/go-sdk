@@ -170,3 +170,39 @@ func TestTimeInMilliseconds(t *testing.T) {
 	assert.Zero(metric1.Histogram)
 	assert.Zero(metric1.Count)
 }
+
+func TestFlush(t *testing.T) {
+	assert := assert.New(t)
+
+	c1 := NewMockCollector()
+	c2 := NewMockCollector()
+
+	var err error
+	mc := MultiCollector{c1, c2}
+
+	err = mc.Flush()
+	assert.Nil(err)
+
+	expectedError := fmt.Errorf("err")
+	c2.FlushErrors <- expectedError
+	err = mc.Flush()
+	assert.Equal(expectedError.Error(), err.Error())
+}
+
+func TestClose(t *testing.T) {
+	assert := assert.New(t)
+
+	c1 := NewMockCollector()
+	c2 := NewMockCollector()
+
+	var err error
+	mc := MultiCollector{c1, c2}
+
+	err = mc.Close()
+	assert.Nil(err)
+
+	expectedError := fmt.Errorf("err")
+	c2.CloseErrors <- expectedError
+	err = mc.Close()
+	assert.Equal(expectedError.Error(), err.Error())
+}
